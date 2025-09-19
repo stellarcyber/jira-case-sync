@@ -1,0 +1,108 @@
+# jira attributes
+
+# if not using a per tenant project key, then this value needs to be populated
+# all issues will be created under this project
+jira_project_key: "STIP"
+
+# Added support for jira project keys to be defined per tenant
+# If this field is populated, the "jira_project_key" value above is ignored
+# Using the stellar tenant property below, read the jira project key for that tenant
+# If cases are found, the tenant is looked up and the project key is extracted from the field below
+# if the field is empty, the case is ignored
+# Valid fields are: address, contact (preferably address)
+per_tenant_project_key_field: "address"
+
+# This is teh type of issue to create within Jira (ignored if using the servicedesk api)
+jira_issue_key: "Security Event"
+
+# polling interval in minutes for sync
+stellar_poll_interval: 5
+
+# tag to add to stellar cases after the initial sync
+stellar_case_tag: "jira_issue_opened"
+
+# when stellar opens a jira issue, this string will be prefixed to the jira issue
+# leave blank or comment out to omit
+subject_prefix: "StellarCyber Alert: "
+
+# list of stellar tenants to filter in (inclusion list)
+# if commented out, then cases from all tenants will be included
+#tenant_filter:
+#  - "azure_ad_riskyuser"
+#  - "another tenant"
+
+# KEY VALUES are used as the jira priority name (evidently case-sensitive) and must match those used by JIRA
+# They are listed in the order they are processed/checked against the case score
+#  - if case score is greater than the "min" value, then it is considered a match and processing stops
+# IDs are ignored placeholders for now, as are hours
+SLA:
+  Critical:
+    min: 90
+    hours: 2
+    jira_priority: 1
+  High:
+    min: 75
+    hours: 6
+    jira_priority: 2
+  Medium:
+    min: 19
+    hours: 48
+    jira_priority: 3
+  Informational:
+    min: 1
+    hours: 72
+    jira_priority: 4
+
+####################
+#
+# JIRA SYNC
+
+# set true to have jira comments sync'd back to stellar
+sync_jira_comments: false
+
+# sync comments by querying the jira servicedesk api (which contains a "public" tag for internal or external comments)
+jira_comments_use_servicedesk_api: true
+
+# sync only "internal" comment, "public" comments, or leave empty/comment out for all jira comments back to stellar
+# (servicedesk api must be true to set internal or public)
+jira_comments_filter: "internal"
+
+# set true to have jira assignees added as a stellar case comment
+add_jira_assignee_to_comment: false
+
+# set to true to sync the jira priority back to the stellar case when jira priority changes
+sync_jira_priority: false
+
+# the jira <-> stellar priority mapping when the jira priority sync is set to true (above)
+# jira priority: stellar severity (critical, high, medium, low)
+jira_priority_map:
+  "Critical": "Critical"
+  "High": "High"
+  "Medium": "Medium"
+  "Informational": "Low"
+
+# custom jira fields
+# for now - any fields below will populate with a date value (e.g.: "2024-10-03")
+# get the field id by using the get_issue_fields method and grep for the field name
+#custom_field: "customfield_10015"
+
+####################
+#
+# STELLAR SYNC
+
+# set to true to sync stellar comments to the jira issue
+sync_stellar_comments: false
+
+# set to true to sync updates to a stellar case (score, new alerts) to the ira issue as a comment
+sync_stellar_case_updates: true
+
+# set to true to have stellar comments or updates tagged as public, which means they will be exposed to external parties and receive notifications
+# if set to false, the comments are tagged internal which hides the comment from external parties and disables notifications
+# defaults to true
+sync_stellar_comments_as_public: false
+
+
+
+
+
+
