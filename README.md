@@ -17,7 +17,7 @@ There are 2 important files associated with the Sync service that are contained 
    
     `docker build -t jira-case-sync .`
 
-3. Create a directory on the docker machine that will contain the config. This diredtory will be blind mounted to the container at runtime.
+3. Create a directory on the docker machine that will contain the config. This diredtory will be bind mounted to the container at runtime.
 
    `mkdir /some/config/directory`
 
@@ -37,7 +37,7 @@ There are 2 important files associated with the Sync service that are contained 
    
    `vi /some/protected/directory/jira-sync.env`
 
-7. Run the docker image using a blind mount to point to the config directory. Replace **/some/config/directory** with the local directory used in step 3/4. Replace **/some/protected/directory** with the local directory used in step 5/6.
+7. Run the docker image using a bind mount to point to the config directory. Replace **/some/config/directory** with the local directory used in step 3/4. Replace **/some/protected/directory** with the local directory used in step 5/6.
 
    ``docker run --restart unless-stopped -d --mount type=bind,source=/some/config/directory,target=/app/data --env-file /some/protected/directory/jira-sync.env jira-case-sync:latest``
 
