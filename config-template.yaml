@@ -101,6 +101,17 @@ sync_stellar_case_updates: true
 # defaults to true
 sync_stellar_comments_as_public: false
 
+# enter the name of the jira resolved state in order to sync the stellar case resolution back to jira
+# leave blank or comment out to disable
+# resolved types, such as Benign, False Positive, True Positive will also sync if there is a match
+# see transitions: /rest/api/2/issue/{issue key}/transitions
+# see resolutions: /rest/api/2/resolution
+sync_stellar_status_resolved: "Resolved"
+stellar_case_resolutions:
+  "Benign": "Benign"
+  "False Positive": "False Positive"
+  "True Positive": "True Positive"
+  "Default": "Benign"
 
 
 
