@@ -1,4 +1,4 @@
-__version__ = '20250916.000'
+__version__ = '20251020.000'
 
 '''
     Provides methods to call JIRA API for issue creation and update
@@ -11,6 +11,7 @@ __version__ = '20250916.000'
                 20250307.000    added method to return the jira issue URL based on ticket key
                 20250905.000    enhanced auth moded to support basic and bearer tokens
                 20250916.000    added methods for getting or adding comments using the servicedeskapi and public tag
+                20251020.000    added methods to support resolving a jira case with transitions and resolution types
 
 '''
 
@@ -51,6 +52,7 @@ class StellarJIRA:
         self.jira_comment_use_servicedesk_api = config.get('jira_comments_use_servicedesk_api', False)
         self.jira_comment_filter = config.get('jira_comments_filter', '')   # public, internal, empty (for all)
         self.jira_comments_as_public = config.get('sync_stellar_comments_as_public', True)
+        self.jira_resolutions_map = config.get('stellar_case_resolutions', {})
 
     def get_version(self):
         return __version__
@@ -436,6 +438,62 @@ class StellarJIRA:
 
         except Exception as e:
             self.l.error("Cannot perform POST request for JIRA add_issue_attachment: [{} {}]".format(return_code, e))
+
+        return ret
+
+    def resolve_issue(self, issue_id, resolution_name, resolution_type=None):
+        transitions = self._get_transitions(issue_id=issue_id)
+        jira_resolution = ''
+        return_code = 500
+        if resolution_name in transitions:
+            t_id = transitions[resolution_name]
+            if self.jira_resolutions_map:
+                if resolution_type and resolution_type in self.jira_resolutions_map:
+                    jira_resolution = self.jira_resolutions_map[resolution_type]
+                elif "Default" in self.jira_resolutions_map:
+                    jira_resolution = self.jira_resolutions_map["Default"]
+            if t_id:
+                j_data = {"transition": {"id": t_id}}
+                if jira_resolution:
+                    j_data['fields'] = {"resolution": {"name": jira_resolution}}
+                path = "rest/api/2/issue/{}/transitions".format(issue_id)
+                url = "{}/{}".format(self.jira_url, path)
+                try:
+                    r = requests.post(url=url, headers=self.headers, json=j_data)
+                    return_code = r.status_code
+                    if 200 <= r.status_code <= 299:
+                        ''' all good '''
+                        pass
+                    else:
+                        ret = {"error": r.text}
+                        raise Exception("{}".format(r.text))
+                except Exception as e:
+                    self.l.error("Cannot perform POST request for JIRA resolve issue: [{} {}]".format(return_code, e))
+        else:
+            self.l.error("Jira resolution name not found in transitions for this issue: [{}] [{}]".format(issue_id, resolution_name))
+
+
+
+    def _get_transitions(self, issue_id):
+        ret = {}
+        # path = "rest/api/3/issue/{}/transitions".format(issue_id)
+        path = "rest/api/2/issue/{}/transitions".format(issue_id)
+        url = "{}/{}".format(self.jira_url, path)
+        try:
+            r = requests.get(url=url, headers=self.headers)
+            return_code = r.status_code
+            if 200 <= r.status_code <= 299:
+                transitions = r.json().get('transitions', [])
+                for transition in transitions:
+                    t_id = transition.get('id')
+                    t_name = transition.get('to', {}).get('name', '')
+                    if t_id and t_name:
+                        ret[t_name] = t_id
+            else:
+                ret = {"error": r.text}
+                raise Exception("{}".format(r.text))
+        except Exception as e:
+            self.l.error("Cannot perform GET request for JIRA get_transitions for issue: [{} {}]".format(return_code, e))
 
         return ret
 
