@@ -1,4 +1,4 @@
-__version__ = '20250912.000'
+__version__ = '20251016.000'
 
 """
 Provides utilitarian methods for general stellar cyber usage.
@@ -36,7 +36,8 @@ Provides utilitarian methods for general stellar cyber usage.
                 20250902.000    support for new auth method for user based API key for RBAC policy support   
                 20250904.000    updated local_db _init to handle path to database (container persistent volume support)
                                 updated STELLAR_UTIL _init to handle path to checkpoint file (container persistent volume support)
-                20250912.000    improved the use of the persistent data directory for checkpoint file read/write                 
+                20250912.000    improved the use of the persistent data directory for checkpoint file read/write
+                20251016.000    STELLAR_UTIL.update_stellar_case change in behavior - if unknown case status, ignore               
 """
 
 import os, sys
@@ -61,6 +62,12 @@ class CASE_STATUS(Enum):
     In_Progress = "In Progress"
     Resolved = "Resolved"
     Canceled = "Cancelled"
+
+    @property
+    def get_list(self):
+        for s in self.items():
+            print(s)
+        return "my list"
 
 
 class STELLAR_UTIL:
@@ -179,7 +186,7 @@ class STELLAR_UTIL:
         return "https://{}/cases/case-detail/{}".format(self.stellar_dp, case_id)
 
     def get_stellar_cases(self, from_ts=0, from_ts_checkpoint_file='', tenant_id='', use_modified_at=False,
-                          ignore_case_tag=True, ignore_api_user_mods=False):
+                          ignore_case_tag=True, ignore_api_user_mods=False, status=None):
         path = "/connect/api/v1/cases?"
         from_cp_file_path = ''
         # from_cp_file is a switch used to force reading timestamp from checkpoint file and takes priority
@@ -204,6 +211,8 @@ class STELLAR_UTIL:
             path += "&FROM~score={}".format(self.stellar_min_score)
         if tenant_id:
             path += "&tenantid={}".format(tenant_id)
+        if status:
+            path += "&status={}".format(status)
 
         if ignore_api_user_mods:
             if not self.stellar_fb_user_id:
@@ -240,17 +249,17 @@ class STELLAR_UTIL:
         r = r.get('data', {})
         return r
 
-    def update_stellar_case(self, case_id, case_comment='', case_status=CASE_STATUS.In_Progress, update_tag=True):
+    def update_stellar_case(self, case_id, case_comment='', case_status=CASE_STATUS.In_Progress.value, update_tag=True):
         if case_comment:
             path = "/connect/api/v1/cases/{}/comments".format(case_id)
             comment_data = {"comment": case_comment}
             self._request_post(path=path, data=comment_data)
         if case_status:
-            if not case_status in CASE_STATUS:
-                case_status = CASE_STATUS.In_Progress
-            path = "/connect/api/v1/cases/{}".format(case_id)
-            status_data = {"status": case_status.value}
-            self._request_put(path=path, data=status_data)
+            ''' 20251016.000 - if unknown case status, ignore change '''
+            if case_status in [item.value for item in CASE_STATUS]:
+                path = "/connect/api/v1/cases/{}".format(case_id)
+                status_data = {"status": case_status}
+                self._request_put(path=path, data=status_data)
         if update_tag:
             path = "/connect/api/v1/cases/{}".format(case_id)
             status_data = {"tags": {"add": [self.stellar_case_tag]}}
@@ -270,7 +279,7 @@ class STELLAR_UTIL:
         status_data = {"status": "Resolved"}
         if update_alerts:
             status_data['update_alerts'] = update_alerts
-        if resolution and resolution in ["Resolved", "Benign", "True Positive"]:
+        if resolution and resolution in ["False Positive", "Benign", "True Positive"]:
             status_data['resolution'] = resolution
         path = "/connect/api/v1/cases/{}".format(case_id)
         self._request_put(path=path, data=status_data)
@@ -507,8 +516,7 @@ class STELLAR_UTIL:
 
         return hits_total, ret
 
-    def get_stellar_es_query(self, stellar_index="aella-syslog", from_ts=0, to_ts=0, seconds_ago=0, tenant_id="",
-                             query=''):
+    def get_stellar_es_query(self, stellar_index="aella-syslog", from_ts=0, to_ts=0, seconds_ago=0, tenant_id="", query=''):
         hits_total = 0
         hits_returned = 0
         ret = []
