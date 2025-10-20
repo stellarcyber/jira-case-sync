@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-__version__ = '20250915.000'
+__version__ = '20251020.000'
 
 '''
     version history
@@ -17,6 +17,8 @@ __version__ = '20250915.000'
         20250826.000    added support for per tenant jira key mapping
         20250908.000    moved to LOGGING_UTIL for webhook log reception
         20250915.000    added stellar to jira sync for comments and case updates (score / new alerts)
+        20251016.000    added config item to set the stellar case status after the initial sync with jira (was "In Progress")
+        20251020.000    added functionality to support sync'ing stellar case status over to jira status
 
 '''
 
@@ -121,12 +123,16 @@ if __name__ == "__main__":
 
         STELLAR_SYNC_COMMENTS = config.get('sync_stellar_comments', False)
         STELLAR_SYNC_CASE_UPDATES = config.get('sync_stellar_case_updates', False)
+        STELLAR_SYNC_CASE_STATUS_RESOLVED = config.get('sync_stellar_status_resolved', '')
+        STELLAR_CASE_STATUS_ON_SYNC = config.get('stellar_case_status_upon_initial_sync', '')
 
         CHECKPOINT_FILENAME = "jira_checkpoint"
 
         JIRA = StellarJIRA(logger=l, config=config)
         SU = STELLAR_UTIL.STELLAR_UTIL(logger=l, config=config, optional_data_path=args.data_volume)
         LDB = STELLAR_UTIL.local_db(ticket_table_name='jira_tickets', optional_db_dir=args.data_volume)
+
+        ''' testing '''
 
         ''' new functionality - per tenant jira project key mapping - 2025/08/26 '''
         _JIRA_PROJECT_KEY_FIELD_ = config.get('per_tenant_project_key_field', '')
@@ -212,8 +218,10 @@ if __name__ == "__main__":
                 jira_resolution = jira_issue.get('fields', {}).get('resolution', {})
                 if jira_resolution:
                     jira_resolution_description = jira_resolution.get('description', '')
+                    jira_resolution_name = jira_resolution.get('name', '')
                     l.info("JIRA issue is in resolved state: [{}] - marking stellar case closed: [{}: {}]".format(rt_ticket_number, stellar_case_number, stellar_case_id))
-                    SU.update_stellar_case(case_id=stellar_case_id, case_status=STELLAR_UTIL.CASE_STATUS.Resolved, case_comment=jira_resolution_description, update_tag=False)
+                    # SU.update_stellar_case(case_id=stellar_case_id, case_status="Resolved", case_comment=jira_resolution_description, update_tag=False, )
+                    SU.resolve_stellar_case(case_id=stellar_case_id, resolution=jira_resolution_name)
                     LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
 
             '''                                             '''
@@ -241,7 +249,7 @@ if __name__ == "__main__":
                 """ if ticket linkage exists, this is an existing sync """
                 ticket_linkage = LDB.get_ticket_linkage(stellar_case_id=stellar_case_id)
                 if ticket_linkage:
-                    if (STELLAR_SYNC_COMMENTS or STELLAR_SYNC_CASE_UPDATES):
+                    if (STELLAR_SYNC_COMMENTS or STELLAR_SYNC_CASE_UPDATES or STELLAR_SYNC_CASE_STATUS_RESOLVED):
                         rt_ticket_number = ticket_linkage.get('remote_ticket_id', '')
                         rt_ticket_last_modified = ticket_linkage.get('remote_ticket_last_modified', 0)
                         stellar_case_id = ticket_linkage.get('stellar_case_id', '')
@@ -292,6 +300,20 @@ if __name__ == "__main__":
                                     ''' update the local db - using the case score timestamp to prevent the me request from recursive updates back to stellar '''
                                     LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=latest_case_score_ts)
 
+                            if STELLAR_SYNC_CASE_STATUS_RESOLVED:
+                                case_status = case.get('status', '')
+                                case_resolution = case.get('resolution', '')
+                                if case_status == "Resolved":
+                                    l.info("Stellar case found in a resolved state. Resolving Jira issue: [case: {}] [jira: {}] [{}/{}]".format(stellar_case_id, rt_ticket_number, STELLAR_SYNC_CASE_STATUS_RESOLVED, case_resolution))
+                                    JIRA.resolve_issue(issue_id=rt_ticket_number, resolution_name=STELLAR_SYNC_CASE_STATUS_RESOLVED, resolution_type=case_resolution)
+                                    LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
+                                elif case_status == "Canceled":
+                                    l.info("Stellar case found in a canceled state. Resolving Jira issue: [case: {}] [jira: {}] [{}/{}]".format(stellar_case_id, rt_ticket_number, STELLAR_SYNC_CASE_STATUS_RESOLVED,))
+                                    JIRA.resolve_issue(issue_id=rt_ticket_number,
+                                                       resolution_name=STELLAR_SYNC_CASE_STATUS_RESOLVED,
+                                                       resolution_type=case_resolution)
+                                    LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
+
                 else:
 
                     """ this is a new instance - create new jira ticket and insert linkage into local database """
@@ -337,7 +359,7 @@ if __name__ == "__main__":
                         LDB.put_ticket_linkage(stellar_case_id=stellar_case_id, stellar_case_number=stellar_case_number, remote_ticket_id=jira_key)
                         stellar_case_comment = "Jira issue created: id: [{}] | key: [{}] | url: [{}]".format(jira_id, jira_key, jira_url)
                         l.info(stellar_case_comment)
-                        SU.update_stellar_case (case_id=stellar_case_id, case_comment=stellar_case_comment)
+                        SU.update_stellar_case (case_id=stellar_case_id, case_comment=stellar_case_comment, case_status=STELLAR_CASE_STATUS_ON_SYNC)
                     else:
                         l.error("Problem creating JIRA issue - no jira ID or KEY returned")
 
