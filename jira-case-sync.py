@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-__version__ = '20251020.000'
+__version__ = '20251022.000'
 
 '''
     version history
@@ -19,6 +19,7 @@ __version__ = '20251020.000'
         20250915.000    added stellar to jira sync for comments and case updates (score / new alerts)
         20251016.000    added config item to set the stellar case status after the initial sync with jira (was "In Progress")
         20251020.000    added functionality to support sync'ing stellar case status over to jira status
+        20251022.000    added extra debugging to assist with understanding stellar -> jira sync decisions
 
 '''
 
@@ -237,9 +238,9 @@ if __name__ == "__main__":
             ''' manage checkpoint '''
             NEW_CHECKPOINT_TS = int(time() * 1000)
             CHECKPOINT_TS = int(SU.checkpoint_read(filepath=CHECKPOINT_FILENAME))
-            cases = SU.get_stellar_cases(from_ts=CHECKPOINT_TS, use_modified_at=True)
+            # cases = SU.get_stellar_cases(from_ts=CHECKPOINT_TS, use_modified_at=True)
             # cases = SU.get_stellar_cases(from_ts=1721930052690)
-            # cases = {"cases": [SU.get_stellar_case_by_id(case_id="68cd43d841994b7b7b545371")]}
+            cases = {"cases": [SU.get_stellar_case_by_id(case_id="68f2302f596a6ae0cfbd9af7")]}
             for case in cases.get('cases', {}):
                 stellar_case_id = case.get("_id")
                 stellar_case_number = case.get('ticket_id')
@@ -313,7 +314,10 @@ if __name__ == "__main__":
                                                        resolution_name=STELLAR_SYNC_CASE_STATUS_RESOLVED,
                                                        resolution_type=case_resolution)
                                     LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
-
+                        else:
+                            l.debug("Stellar case modified but earlier then last ticket update: sc mod: {} | last sync mod: {}".format(stellar_case_modified_ts, rt_ticket_last_modified))
+                    else:
+                        l.debug("Stellar case modified but no syncs optioned: [{}] | sc_sync_comments: {} | sc_sync_updates: {} | sc_sync_resolved: {}".format(stellar_case_id, STELLAR_SYNC_COMMENTS, STELLAR_SYNC_CASE_UPDATES, STELLAR_SYNC_CASE_STATUS_RESOLVED))
                 else:
 
                     """ this is a new instance - create new jira ticket and insert linkage into local database """
