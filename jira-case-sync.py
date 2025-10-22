@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-__version__ = '20251022.001'
+__version__ = '20251022.002'
 
 '''
     version history
@@ -20,6 +20,7 @@ __version__ = '20251022.001'
         20251016.000    added config item to set the stellar case status after the initial sync with jira (was "In Progress")
         20251020.000    added functionality to support sync'ing stellar case status over to jira status
         20251022.001    added extra debugging to assist with understanding stellar -> jira sync decisions
+        20251022.002    other logic adjustments for case resolution clarity
 
 '''
 
@@ -250,12 +251,14 @@ if __name__ == "__main__":
                 """ if ticket linkage exists, this is an existing sync """
                 ticket_linkage = LDB.get_ticket_linkage(stellar_case_id=stellar_case_id)
                 if ticket_linkage:
+                    if ticket_linkage.get('state', '') == 'closed':
+                        continue
                     if (STELLAR_SYNC_COMMENTS or STELLAR_SYNC_CASE_UPDATES or STELLAR_SYNC_CASE_STATUS_RESOLVED):
                         rt_ticket_number = ticket_linkage.get('remote_ticket_id', '')
                         rt_ticket_last_modified = ticket_linkage.get('remote_ticket_last_modified', 0)
-                        stellar_case_id = ticket_linkage.get('stellar_case_id', '')
-                        stellar_case_number = ticket_linkage.get('stellar_case_number', '')
-                        
+                        # stellar_case_id = ticket_linkage.get('stellar_case_id', '')
+                        # stellar_case_number = ticket_linkage.get('stellar_case_number', '')
+
                         if stellar_case_modified_ts > rt_ticket_last_modified:
 
                             # ''' if this case was last modified by the API user, most likely can skip to prevent recursive updates '''
@@ -303,7 +306,7 @@ if __name__ == "__main__":
                                     LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=latest_case_score_ts)
                         else:
                             l.debug("Stellar case modified but earlier then last ticket update: sc mod: {} | last sync mod: {}".format(stellar_case_modified_ts, rt_ticket_last_modified))
-                        
+
                         ''' if in resolved state, ignore timestamp comparison '''
                         if STELLAR_SYNC_CASE_STATUS_RESOLVED:
                             case_status = case.get('status', '')
