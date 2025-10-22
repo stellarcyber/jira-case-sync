@@ -1,4 +1,4 @@
-__version__ = '20251020.000'
+__version__ = '20251022.000'
 
 '''
     Provides methods to call JIRA API for issue creation and update
@@ -12,6 +12,7 @@ __version__ = '20251020.000'
                 20250905.000    enhanced auth moded to support basic and bearer tokens
                 20250916.000    added methods for getting or adding comments using the servicedeskapi and public tag
                 20251020.000    added methods to support resolving a jira case with transitions and resolution types
+                20251022.000    fixed small bug that ignored the configured summary prefix when using the service desk API
 
 '''
 
@@ -194,10 +195,11 @@ class StellarJIRA:
 
     def create_issue(self, summary, description, case_score, label=''):
         ret = {}
+        jira_summary = "{}{}".format(self.subject_prefix, summary),
         if self.jira_comment_use_servicedesk_api:
-            ret = self._create_request(summary=summary, description=description, case_score=case_score, label=label)
+            ret = self._create_request(summary=jira_summary, description=description, case_score=case_score, label=label)
         else:
-            ret = self._create_issue(summary=summary, description=description, case_score=case_score, label=label)
+            ret = self._create_issue(summary=jira_summary, description=description, case_score=case_score, label=label)
         return ret
 
     def _create_issue(self, summary, description, case_score, label=''):
@@ -211,7 +213,7 @@ class StellarJIRA:
                     {
                         "key": "{}".format(self.jira_project_key)
                     },
-                "summary": "{}{}".format(self.subject_prefix, summary),
+                "summary": "{}".format(summary),
                 "description": "{}".format(description),
                 "issuetype": {
                     "name": "{}".format(self.jira_issue_key)
