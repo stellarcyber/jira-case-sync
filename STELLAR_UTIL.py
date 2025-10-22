@@ -1,4 +1,4 @@
-__version__ = '20251016.000'
+__version__ = '20251022.000'
 
 """
 Provides utilitarian methods for general stellar cyber usage.
@@ -37,7 +37,8 @@ Provides utilitarian methods for general stellar cyber usage.
                 20250904.000    updated local_db _init to handle path to database (container persistent volume support)
                                 updated STELLAR_UTIL _init to handle path to checkpoint file (container persistent volume support)
                 20250912.000    improved the use of the persistent data directory for checkpoint file read/write
-                20251016.000    STELLAR_UTIL.update_stellar_case change in behavior - if unknown case status, ignore               
+                20251016.000    STELLAR_UTIL.update_stellar_case change in behavior - if unknown case status, ignore  
+                20251022.000    local_db get ticket linkage updates to return state (open/closed)             
 """
 
 import os, sys
@@ -1146,7 +1147,7 @@ class STELLAR_UTIL:
 
 class local_db():
 
-    def __init__(self, dbname='stellar.db', ticket_table_name='tickets', optional_db_dir=None):
+    def __init__(self, dbname='stellar_speartip.db', ticket_table_name='tickets', optional_db_dir=None):
         """General Stellar SQLite Class for tracking case syncroniozation with remote ticketing systems.
 
         dbname -- name of the local db file
@@ -1217,7 +1218,7 @@ class local_db():
             field = "remote_ticket_id"
             field_val = remote_ticket_id
         if field:
-            sql = 'SELECT stellar_case_id, stellar_case_number, remote_ticket_id, remote_ticket_last_modified ' \
+            sql = 'SELECT stellar_case_id, stellar_case_number, remote_ticket_id, remote_ticket_last_modified, state ' \
                   'FROM {} WHERE {} = "{}";'.format(self.ticket_table_name, field, field_val)
             with self.con:
                 cur = self.con.cursor()
@@ -1227,8 +1228,12 @@ class local_db():
                     stellar_case_number = r[1]
                     remote_ticket_id = r[2]
                     remote_ticket_last_modifed = r[3]
-                    ret = {"stellar_case_id": stellar_case_id, "stellar_case_number": stellar_case_number,
-                           "remote_ticket_id": remote_ticket_id, "remote_ticket_last_modified": remote_ticket_last_modifed}
+                    state = r[4]
+                    ret = {"stellar_case_id": stellar_case_id,
+                           "stellar_case_number": stellar_case_number,
+                           "remote_ticket_id": remote_ticket_id,
+                           "remote_ticket_last_modified": remote_ticket_last_modifed,
+                           "state": state}
         return ret
 
     def get_open_tickets(self):
