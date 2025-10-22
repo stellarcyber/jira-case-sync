@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-__version__ = '20251022.000'
+__version__ = '20251022.001'
 
 '''
     version history
@@ -19,7 +19,7 @@ __version__ = '20251022.000'
         20250915.000    added stellar to jira sync for comments and case updates (score / new alerts)
         20251016.000    added config item to set the stellar case status after the initial sync with jira (was "In Progress")
         20251020.000    added functionality to support sync'ing stellar case status over to jira status
-        20251022.000    added extra debugging to assist with understanding stellar -> jira sync decisions
+        20251022.001    added extra debugging to assist with understanding stellar -> jira sync decisions
 
 '''
 
@@ -238,9 +238,9 @@ if __name__ == "__main__":
             ''' manage checkpoint '''
             NEW_CHECKPOINT_TS = int(time() * 1000)
             CHECKPOINT_TS = int(SU.checkpoint_read(filepath=CHECKPOINT_FILENAME))
-            # cases = SU.get_stellar_cases(from_ts=CHECKPOINT_TS, use_modified_at=True)
+            cases = SU.get_stellar_cases(from_ts=CHECKPOINT_TS, use_modified_at=True)
             # cases = SU.get_stellar_cases(from_ts=1721930052690)
-            cases = {"cases": [SU.get_stellar_case_by_id(case_id="68f2302f596a6ae0cfbd9af7")]}
+            # cases = {"cases": [SU.get_stellar_case_by_id(case_id="68f2302f596a6ae0cfbd9af7")]}
             for case in cases.get('cases', {}):
                 stellar_case_id = case.get("_id")
                 stellar_case_number = case.get('ticket_id')
@@ -255,6 +255,7 @@ if __name__ == "__main__":
                         rt_ticket_last_modified = ticket_linkage.get('remote_ticket_last_modified', 0)
                         stellar_case_id = ticket_linkage.get('stellar_case_id', '')
                         stellar_case_number = ticket_linkage.get('stellar_case_number', '')
+                        
                         if stellar_case_modified_ts > rt_ticket_last_modified:
 
                             # ''' if this case was last modified by the API user, most likely can skip to prevent recursive updates '''
@@ -300,22 +301,26 @@ if __name__ == "__main__":
 
                                     ''' update the local db - using the case score timestamp to prevent the me request from recursive updates back to stellar '''
                                     LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=latest_case_score_ts)
-
-                            if STELLAR_SYNC_CASE_STATUS_RESOLVED:
-                                case_status = case.get('status', '')
-                                case_resolution = case.get('resolution', '')
-                                if case_status == "Resolved":
-                                    l.info("Stellar case found in a resolved state. Resolving Jira issue: [case: {}] [jira: {}] [{}/{}]".format(stellar_case_id, rt_ticket_number, STELLAR_SYNC_CASE_STATUS_RESOLVED, case_resolution))
-                                    JIRA.resolve_issue(issue_id=rt_ticket_number, resolution_name=STELLAR_SYNC_CASE_STATUS_RESOLVED, resolution_type=case_resolution)
-                                    LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
-                                elif case_status == "Canceled":
-                                    l.info("Stellar case found in a canceled state. Resolving Jira issue: [case: {}] [jira: {}] [{}/{}]".format(stellar_case_id, rt_ticket_number, STELLAR_SYNC_CASE_STATUS_RESOLVED,))
-                                    JIRA.resolve_issue(issue_id=rt_ticket_number,
-                                                       resolution_name=STELLAR_SYNC_CASE_STATUS_RESOLVED,
-                                                       resolution_type=case_resolution)
-                                    LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
                         else:
                             l.debug("Stellar case modified but earlier then last ticket update: sc mod: {} | last sync mod: {}".format(stellar_case_modified_ts, rt_ticket_last_modified))
+                        
+                        ''' if in resolved state, ignore timestamp comparison '''
+                        if STELLAR_SYNC_CASE_STATUS_RESOLVED:
+                            case_status = case.get('status', '')
+                            case_resolution = case.get('resolution', '')
+                            if case_status == "Resolved":
+                                l.info("Stellar case found in a resolved state. Resolving Jira issue: [case: {}] [jira: {}] [{}/{}]".format(stellar_case_id, rt_ticket_number, STELLAR_SYNC_CASE_STATUS_RESOLVED, case_resolution))
+                                JIRA.resolve_issue(issue_id=rt_ticket_number, resolution_name=STELLAR_SYNC_CASE_STATUS_RESOLVED, resolution_type=case_resolution)
+                                LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
+                            elif case_status == "Canceled":
+                                l.info("Stellar case found in a canceled state. Resolving Jira issue: [case: {}] [jira: {}] [{}/{}]".format(stellar_case_id, rt_ticket_number, STELLAR_SYNC_CASE_STATUS_RESOLVED,))
+                                JIRA.resolve_issue(issue_id=rt_ticket_number,
+                                                   resolution_name=STELLAR_SYNC_CASE_STATUS_RESOLVED,
+                                                   resolution_type=case_resolution)
+                                LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
+                            else:
+                                l.debug("Stellar case not found in resolved or canceled state - no sync necessary: [{}]".format(stellar_case_id))
+
                     else:
                         l.debug("Stellar case modified but no syncs optioned: [{}] | sc_sync_comments: {} | sc_sync_updates: {} | sc_sync_resolved: {}".format(stellar_case_id, STELLAR_SYNC_COMMENTS, STELLAR_SYNC_CASE_UPDATES, STELLAR_SYNC_CASE_STATUS_RESOLVED))
                 else:
