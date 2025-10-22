@@ -90,6 +90,11 @@ jira_priority_map:
 #
 # STELLAR SYNC
 
+# upon creation of a new jira ticket, set the stellar status to this value
+# can be one of "Escalated", "New", "In Progress", "Resolved", Cancelled"
+# leave empty or comment out for no change (stellar case will stay NEW)
+stellar_case_status_upon_initial_sync: ""
+
 # set to true to sync stellar comments to the jira issue
 sync_stellar_comments: false
 
