@@ -1,31 +1,34 @@
-# jira attributes
+# 20251027.000
 
-# if not using a per tenant project key, then this value needs to be populated
-# all issues will be created under this project
-jira_project_key: "EX"
-
-# Added support for jira project keys to be defined per tenant
-# If this field is populated, the "jira_project_key" value above is ignored
-# Using the stellar tenant property below, read the jira project key for that tenant
-# If cases are found, the tenant is looked up and the project key is extracted from the field below
-# if the field is empty, the case is ignored
-# Valid fields are: address, contact (preferably address)
+# added support for jira project keys to be defined per tenant
+# based on contents within an attribute field within the tenant properties within stellar
+# if this field is populated, the "jira_project_key" value above is ignored
+# and the value of this field is the field name where the project key will be read from
+# value fields are: address, contact (prefereably address)
+# if the value below is populated, only tenants that have a value within the selected attribute will be sync'd
+# in other words, leave the "address" field blank in tenants to not have them sync to jira tickets
 per_tenant_project_key_field: "address"
 
-# This is teh type of issue to create within Jira (ignored if using the servicedesk api)
-jira_issue_key: "Security Event"
+# jira attributes
 
-# polling interval in minutes for sync
-stellar_poll_interval: 5
+# ignore if using per tenant project key fields
+jira_project_key: "STIP"
 
-# tag to add to stellar cases after the initial sync
+# type of issue to open
+#jira_issue_key: "Security Event"
+jira_issue_type: "Incident"
+
+# polling interval in minutes for new cases and case to issue sync
+stellar_poll_interval: 1
+
+# tag to add to stellar cases once opened in jira
 stellar_case_tag: "jira_issue_opened"
 
-# when stellar opens a jira issue, this string will be prefixed to the jira issue
+# when stellar opens a jira issue, this string will be prefixed to the case name
 # leave blank or comment out to omit
 subject_prefix: "StellarCyber Alert: "
 
-# list of stellar tenants to filter in (inclusion list)
+# list of stellar tenants to filter in
 # if commented out, then cases from all tenants will be included
 #tenant_filter:
 #  - "azure_ad_riskyuser"
@@ -60,18 +63,30 @@ SLA:
 # set true to have jira comments sync'd back to stellar
 sync_jira_comments: false
 
-# sync comments by querying the jira servicedesk api (which contains a "public" tag for internal or external comments)
+# sync comments by querying the jira servicedesk api (which contains a a "public" key for internal or external comments)
 jira_comments_use_servicedesk_api: true
 
-# sync only "internal" comment, "public" comments, or leave empty/comment out for all jira comments back to stellar
+# sync only "internal", "public", or leave empty/comment out for all jira comments back to stellar
 # (servicedesk api must be true to set internal or public)
 jira_comments_filter: "internal"
 
 # set true to have jira assignees added as a stellar case comment
-add_jira_assignee_to_comment: false
+add_jira_assignee_to_comment: true
 
 # set to true to sync the jira priority back to the stellar case when jira priority changes
-sync_jira_priority: false
+sync_jira_priority: true
+
+# set to true to sync the jira resolved state back to the stellar case
+# defaults to true
+sync_jira_state_resolved: true
+
+# set to true to sync the jira in progress state back to the stellar case
+# defaults to false
+sync_jira_state_inprogress: true
+
+# set to true to sync the jira in reopened state back to the stellar case
+# defaults to false
+sync_jira_state_reopen: true
 
 # the jira <-> stellar priority mapping when the jira priority sync is set to true (above)
 # jira priority: stellar severity (critical, high, medium, low)
@@ -79,6 +94,7 @@ jira_priority_map:
   "Critical": "Critical"
   "High": "High"
   "Medium": "Medium"
+  "Low": "Low"
   "Informational": "Low"
 
 # custom jira fields
@@ -117,6 +133,18 @@ stellar_case_resolutions:
   "False Positive": "False Positive"
   "True Positive": "True Positive"
   "Default": "Benign"
+
+# enter the name of the jira reopened state in order to sync the stellar case New back to jira
+# leave blank or comment out to disable
+sync_stellar_status_reopened: "Open"
+
+# enter the name of the jira in progress state in order to sync the stellar case In progress or Escalated back to jira
+# leave blank or comment out to disable
+sync_stellar_status_inprogress: "In Progress"
+
+# sync the stellar assignee to a jira comment
+sync_stellar_assignee_to_jira_comment: true
+
 
 
 
