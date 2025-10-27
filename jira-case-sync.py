@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-__version__ = '20251022.002'
+__version__ = '20251027.002'
 
 '''
     version history
@@ -21,6 +21,7 @@ __version__ = '20251022.002'
         20251020.000    added functionality to support sync'ing stellar case status over to jira status
         20251022.001    added extra debugging to assist with understanding stellar -> jira sync decisions
         20251022.002    other logic adjustments for case resolution clarity
+        20251027.000    rearchitected the way that existing jira tickets are processed; using JQL and timestamp
 
 '''
 
@@ -121,20 +122,31 @@ if __name__ == "__main__":
         JIRA_COMMENT_SYNC = config.get('sync_jira_comments', False)
         JIRA_ASSIGNEE_UPDATE_AS_COMMENT = config.get('add_jira_assignee_to_comment', False)
         JIRA_PRIORITY_UPDATE = config.get('sync_jira_priority', False)
+        JIRA_SYNC_STATE_RESOLVED = config.get('sync_jira_state_resolved', True)
+        JIRA_SYNC_STATE_INPROGRESS = config.get('sync_jira_state_inprogress', False)
+        JIRA_SYNC_STATE_REOPENED = config.get('sync_jira_state_reopen', False)
         JIRA_PRIORITY_MAP = config.get('jira_priority_map', {"Highest": "Critical", "High": "High", "Medium": "Medium", "Low": "Low", "Lowest": "Low"})
 
         STELLAR_SYNC_COMMENTS = config.get('sync_stellar_comments', False)
         STELLAR_SYNC_CASE_UPDATES = config.get('sync_stellar_case_updates', False)
         STELLAR_SYNC_CASE_STATUS_RESOLVED = config.get('sync_stellar_status_resolved', '')
+        STELLAR_SYNC_CASE_STATUS_REOPENED = config.get('sync_stellar_status_reopened', '')
+        STELLAR_SYNC_CASE_STATUS_INPROGRESS = config.get('sync_stellar_status_inprogress', '')
+        STELLAR_SYNC_CASE_ASSIGNEE = config.get('sync_stellar_assignee_to_jira_comment', False)
+
         STELLAR_CASE_STATUS_ON_SYNC = config.get('stellar_case_status_upon_initial_sync', '')
 
-        CHECKPOINT_FILENAME = "jira_checkpoint"
+        STELLAR_CHECKPOINT_FILENAME = "stellar_checkpoint"
+        JIRA_CHECKPOINT_FILENAME = "jira_checkpoint"
 
         JIRA = StellarJIRA(logger=l, config=config)
         SU = STELLAR_UTIL.STELLAR_UTIL(logger=l, config=config, optional_data_path=args.data_volume)
         LDB = STELLAR_UTIL.local_db(ticket_table_name='jira_tickets', optional_db_dir=args.data_volume)
 
         ''' testing '''
+        # r = JIRA.get_issue(issue_id='EX-46')
+        # print(json.dumps(r, sort_keys=True, indent=4))
+        # exit(0)
 
         ''' new functionality - per tenant jira project key mapping - 2025/08/26 '''
         _JIRA_PROJECT_KEY_FIELD_ = config.get('per_tenant_project_key_field', '')
@@ -146,38 +158,58 @@ if __name__ == "__main__":
 
             ts_start_of_loop = time()
 
-            """ check existing / open cases on the jira side """
-            open_tickets = []
-            if args.TEST_MODE:
-                ''' skip jira sync if in test mode '''
-                l.warning('skipping the check of open jira issues - test mode is enabled')
-            else:
-                ''' only check jira sync if one of the sync properties have been optioned in config '''
-                if (JIRA_COMMENT_SYNC or JIRA_ASSIGNEE_UPDATE_AS_COMMENT or JIRA_PRIORITY_UPDATE):
-                    open_tickets = LDB.get_open_tickets()
+            # """ check existing / open cases on the jira side """
+            # open_tickets = []
+            # if args.TEST_MODE:
+            #     ''' skip jira sync if in test mode '''
+            #     l.warning('skipping the check of open jira issues - test mode is enabled')
+            # else:
+            #     ''' only check jira sync if one of the sync properties have been optioned in config '''
+            #     if (JIRA_COMMENT_SYNC or JIRA_ASSIGNEE_UPDATE_AS_COMMENT or JIRA_PRIORITY_UPDATE):
+            #         open_tickets = LDB.get_open_tickets()
 
+
+            '''                                     '''
+            '''     important stuff to do first     '''
+            '''                                     '''
+
+            # open_ticket = LDB.get_ticket_linkage(remote_ticket_id='DEME-363')
+            # print(open_ticket)
+            # exit(0)
+
+            ''' if this returns as an empty dict, the jira project key will default to the one defined in the config'''
+            project_key_map = load_tenants(SU, _JIRA_PROJECT_KEY_FIELD_)
+
+            ''' if using the servicedesk app, these values are necessary - else an empty call that does nothing'''
+            JIRA.get_service_desk_ids()
 
             '''                                                             '''
             ''' get all ACTIVE SYNC jira -> stellar cases and find changes  '''
             '''                                                             '''
-            for open_ticket in open_tickets:
-                rt_ticket_number = open_ticket.get('remote_ticket_id', '')
-                rt_ticket_last_modified = open_ticket.get('remote_ticket_last_modified', '')
-                stellar_case_id = open_ticket.get('stellar_case_id', '')
-                stellar_case_number = open_ticket.get('stellar_case_number', '')
-                l.debug("Checking JIRA ticket: [{}]".format(rt_ticket_number))
-                jira_issue = JIRA.get_issue(rt_ticket_number)
-
-                """ new comments will update the issue TS """
-                """ if that has been updated - then check the comment timestamps """
+            NEW_CHECKPOINT_TS = int(time() * 1000)
+            JIRA_CHECKPOINT_TS = int(SU.checkpoint_read(filepath=JIRA_CHECKPOINT_FILENAME))
+            jira_issues = JIRA.get_issues(since_ts=JIRA_CHECKPOINT_TS)
+            for jira_issue in jira_issues:
+                if args.TEST_MODE:
+                    break
+                jira_issue_key = jira_issue.get('key', '')
                 jira_issue_updated_str = jira_issue.get('fields', {}).get('updated', '')
                 jira_issue_updated_ts = JIRA.jira_datestring_to_epoch(jira_issue_updated_str)
-                if jira_issue_updated_ts > rt_ticket_last_modified:
+
+                """ if ticket linkage exists, this is an existing sync """
+                open_ticket = LDB.get_ticket_linkage(remote_ticket_id=jira_issue_key)
+                if open_ticket:
+                    l.debug("Found an updated jira issue: [{}] [last updated: {}]".format(jira_issue_key, jira_issue_updated_str))
+                    rt_ticket_number = open_ticket.get('remote_ticket_id', '')
+                    rt_ticket_last_modified = open_ticket.get('remote_ticket_last_modified', '')
+                    stellar_case_id = open_ticket.get('stellar_case_id', '')
+                    stellar_case_number = open_ticket.get('stellar_case_number', '')
 
                     ''' update comments back to stellar '''
                     if JIRA_COMMENT_SYNC:
-                        # jira_issue_comments = jira_issue.get('fields', {}).get('comment', {}).get('comments', [])
-                        jira_issue_comments = JIRA.get_comments(issue_id=rt_ticket_number)
+                        """ check the comment timestamps """
+                        l.debug("Checking for new comments: [{}]".format(jira_issue_key))
+                        jira_issue_comments = JIRA.get_comments(issue_id=jira_issue_key)
                         if jira_issue_comments:
                             for jira_comment in jira_issue_comments:
                                 comment_updated_str = jira_comment.get('updated', '')
@@ -192,6 +224,7 @@ if __name__ == "__main__":
 
                     ''' update assignee '''
                     if JIRA_ASSIGNEE_UPDATE_AS_COMMENT:
+                        l.debug("Checking for new assignee: [{}]".format(jira_issue_key))
                         latest_assignee = ''
                         if jira_issue.get('fields', {}).get('assignee', {}):
                             latest_assignee_name = jira_issue.get('fields', {}).get('assignee', {}).get('displayName', '')
@@ -205,6 +238,7 @@ if __name__ == "__main__":
 
                     ''' sync jira priority back to stellar case '''
                     if JIRA_PRIORITY_UPDATE:
+                        l.debug("Syncing priority: [{}]".format(jira_issue_key))
                         if jira_issue.get('fields', {}).get('priority', {}):
                             jira_priority = jira_issue.get('fields', {}).get('priority', {}).get('name', "")
                             if jira_priority in JIRA_PRIORITY_MAP:
@@ -212,123 +246,185 @@ if __name__ == "__main__":
                                 l.info("JIRA issue: [{}] | Stellar case: [{}] - updating case severity: [{}]".format(rt_ticket_number, stellar_case_number, stellar_severity))
                                 SU.update_stellar_case_severity(case_id=stellar_case_id, case_severity=stellar_severity)
 
+                    ''' sync jira status reopened and/or in progress '''
+                    l.debug("Checking status change")
+                    jira_issue_status = jira_issue.get('fields', {}).get('status', {}).get('name', '')
+                    if JIRA_SYNC_STATE_REOPENED and jira_issue_status == "Reopened":
+                        SU.update_stellar_case(case_id=stellar_case_id, case_status="New", update_tag=False)
+                        l.info("JIRA issue: [{}] | Stellar case: [{}] - updating case status to: [{}]".format(rt_ticket_number, stellar_case_number, "NEW"))
+                    elif JIRA_SYNC_STATE_INPROGRESS and jira_issue_status == "In Progress":
+                        SU.update_stellar_case(case_id=stellar_case_id, case_status="In Progress", update_tag=False)
+                        l.info("JIRA issue: [{}] | Stellar case: [{}] - updating case status to: [{}]".format(rt_ticket_number, stellar_case_number, "In Progress"))
 
                     ''' update local tracking db with timestamp of jira issue'''
-                    LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=jira_issue_updated_ts)
+                    LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=jira_issue_updated_ts, state="sync")
 
-                """ resolved issues will have something populated in the 'resolved' section of the dataset """
-                jira_resolution = jira_issue.get('fields', {}).get('resolution', {})
-                if jira_resolution:
-                    jira_resolution_description = jira_resolution.get('description', '')
-                    jira_resolution_name = jira_resolution.get('name', '')
-                    l.info("JIRA issue is in resolved state: [{}] - marking stellar case closed: [{}: {}]".format(rt_ticket_number, stellar_case_number, stellar_case_id))
-                    # SU.update_stellar_case(case_id=stellar_case_id, case_status="Resolved", case_comment=jira_resolution_description, update_tag=False, )
-                    SU.resolve_stellar_case(case_id=stellar_case_id, resolution=jira_resolution_name)
-                    LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
+                    ''' resolved issues will have something populated in the 'resolved' section of the dataset '''
+                    ''' this state ignores the timestamps associated with jira issue modification'''
+                    if JIRA_SYNC_STATE_RESOLVED:
+                        jira_resolution = jira_issue.get('fields', {}).get('resolution', {})
+                        if jira_resolution:
+                            jira_resolution_description = jira_resolution.get('description', '')
+                            jira_resolution_name = jira_resolution.get('name', '')
+                            l.info("JIRA issue is in resolved state: [{}] - marking stellar case closed: [{}: {}]".format(rt_ticket_number, stellar_case_number, stellar_case_id))
+                            # SU.update_stellar_case(case_id=stellar_case_id, case_status="Resolved", case_comment=jira_resolution_description, update_tag=False, )
+                            SU.resolve_stellar_case(case_id=stellar_case_id, resolution=jira_resolution_name)
+                            LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
+
 
             '''                                             '''
             ''' get all STELLAR cases since last checkpoint '''
             '''                                             '''
 
-            ''' if this returns as an empty dict, the jira project key will default to the one defined in the config'''
-            project_key_map = load_tenants(SU, _JIRA_PROJECT_KEY_FIELD_)
-
-            ''' if using the servicedesk app, these values are necessary - else an empty call that does nothing'''
-            JIRA.get_service_desk_ids()
-
             ''' manage checkpoint '''
             NEW_CHECKPOINT_TS = int(time() * 1000)
-            CHECKPOINT_TS = int(SU.checkpoint_read(filepath=CHECKPOINT_FILENAME))
-            cases = SU.get_stellar_cases(from_ts=CHECKPOINT_TS, use_modified_at=True)
+            CHECKPOINT_TS = int(SU.checkpoint_read(filepath=STELLAR_CHECKPOINT_FILENAME))
+            # cases = SU.get_stellar_cases(from_ts=CHECKPOINT_TS, use_modified_at=True)
             # cases = SU.get_stellar_cases(from_ts=1721930052690)
-            # cases = {"cases": [SU.get_stellar_case_by_id(case_id="68f2302f596a6ae0cfbd9af7")]}
+            cases = {"cases": [SU.get_stellar_case_by_id(case_id="68ff2749332356d2debdd1ec")]}
             for case in cases.get('cases', {}):
                 stellar_case_id = case.get("_id")
                 stellar_case_number = case.get('ticket_id')
                 stellar_case_modified_ts = case.get('modified_at', 0)
                 stellar_case_last_modified_by = case.get('modified_by_name', '')
+                stellar_case_status = case.get('status', '')
 
                 """ if ticket linkage exists, this is an existing sync """
                 ticket_linkage = LDB.get_ticket_linkage(stellar_case_id=stellar_case_id)
                 if ticket_linkage:
-                    if ticket_linkage.get('state', '') == 'closed':
-                        continue
-                    if (STELLAR_SYNC_COMMENTS or STELLAR_SYNC_CASE_UPDATES or STELLAR_SYNC_CASE_STATUS_RESOLVED):
-                        rt_ticket_number = ticket_linkage.get('remote_ticket_id', '')
-                        rt_ticket_last_modified = ticket_linkage.get('remote_ticket_last_modified', 0)
-                        # stellar_case_id = ticket_linkage.get('stellar_case_id', '')
-                        # stellar_case_number = ticket_linkage.get('stellar_case_number', '')
+                    rt_ticket_number = ticket_linkage.get('remote_ticket_id', '')
+                    rt_ticket_last_modified = ticket_linkage.get('remote_ticket_last_modified', 0)
+                    stellar_case_activities = SU.get_case_activities(case_id=stellar_case_id)
+                    sync_state = ticket_linkage.get('state', '')
 
-                        if stellar_case_modified_ts > rt_ticket_last_modified:
+                    if sync_state == 'closed':
+                        ''' see if there is a status change - might need to reopen '''
+                        if stellar_case_status in ['Resolved', 'Cancelled']:
+                            ''' skip if resolved - if not, reopen below if optioned '''
+                            continue
 
-                            # ''' if this case was last modified by the API user, most likely can skip to prevent recursive updates '''
-                            # if stellar_case_last_modified_by == SU.stellar_fb_user:
-                            #     l.info("Stellar case last modified by API user - skipping to prevent recursive updates")
-                            #     continue
+                    if stellar_case_modified_ts > rt_ticket_last_modified:
 
-                            ''' update comments if optioned '''
-                            if STELLAR_SYNC_COMMENTS:
-                                stellar_case_comments = SU.get_case_comments(case_id=stellar_case_id)
-                                for stellar_case_comment in stellar_case_comments:
-                                    comment_ts = int(stellar_case_comment.get('created_at', 0))
-                                    comment_text = stellar_case_comment.get('comment', '')
-                                    comment_user = stellar_case_comment.get('user')
-                                    if comment_ts > rt_ticket_last_modified:
-                                        note_text = "*Stellar case comment added:*\n\n{}".format(comment_text)
-                                        JIRA.add_comment( issue_id=rt_ticket_number, comment_body=note_text)
-                                        LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=comment_ts)
+                        # ''' if this case was last modified by the API user, most likely can skip to prevent recursive updates '''
+                        # if stellar_case_last_modified_by == SU.stellar_fb_user:
+                        #     l.info("Stellar case last modified by API user - skipping to prevent recursive updates")
+                        #     continue
 
-                            ''' is this a score update? '''
-                            if STELLAR_SYNC_CASE_UPDATES:
-                                stellar_case_score = case.get('score', 0)
-                                latest_case_score = SU.get_latest_case_score(stellar_case_id)
-                                latest_case_score_ts = latest_case_score.get('timestamp', 0)
-                                if latest_case_score_ts >= rt_ticket_last_modified:
+                        ''' update comments if optioned '''
+                        if STELLAR_SYNC_COMMENTS:
+                            stellar_case_comments = SU.get_case_comments(case_id=stellar_case_id)
+                            for stellar_case_comment in stellar_case_comments:
+                                comment_ts = int(stellar_case_comment.get('created_at', 0))
+                                comment_text = stellar_case_comment.get('comment', '')
+                                comment_user = stellar_case_comment.get('user')
+                                if comment_ts > rt_ticket_last_modified:
+                                    note_text = "*Stellar case comment added:*\n\n{}".format(comment_text)
+                                    JIRA.add_comment( issue_id=rt_ticket_number, comment_body=note_text)
+                                    LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=comment_ts)
 
-                                    ''' the case score has been updated since last checked '''
-                                    l.debug(
-                                        "Stellar case score update - updating priority and adding note: Stellar Case ID: [{}] | Ticket Number: [{}] | JIRA id: [{}]".format(
-                                            stellar_case_id, stellar_case_number, rt_ticket_number))
+                        ''' update stellar case score  '''
+                        if STELLAR_SYNC_CASE_UPDATES:
+                            stellar_case_score = case.get('score', 0)
+                            latest_case_score = SU.get_latest_case_score(stellar_case_id)
+                            latest_case_score_ts = latest_case_score.get('timestamp', 0)
+                            if latest_case_score_ts >= rt_ticket_last_modified:
 
-                                    ''' grab the reason the score was change - if the reason exists '''
-                                    score_change_reasons = latest_case_score.get('reasons', [])
-                                    if score_change_reasons:
-                                        score_change_reason = score_change_reasons[0].get('reason', '')
+                                ''' the case score has been updated since last checked '''
+                                l.debug(
+                                    "Stellar case score update - updating priority and adding note: Stellar Case ID: [{}] | Ticket Number: [{}] | JIRA id: [{}]".format(
+                                        stellar_case_id, stellar_case_number, rt_ticket_number))
 
-                                    ''' populate and format the final note to be added '''
-                                    note_text = "*Stellar Case Score has change to: {}*\n\nReason: {}".format(
-                                        stellar_case_score, score_change_reason)
+                                ''' grab the reason the score was change - if the reason exists '''
+                                score_change_reasons = latest_case_score.get('reasons', [])
+                                if score_change_reasons:
+                                    score_change_reason = score_change_reasons[0].get('reason', '')
 
-                                    ''' add the note and update the score '''
-                                    JIRA.add_comment(issue_id=rt_ticket_number, comment_body=note_text)
+                                ''' populate and format the final note to be added '''
+                                note_text = "*Stellar Case Score has change to: {}*\n\nReason: {}".format(
+                                    stellar_case_score, score_change_reason)
 
-                                    ''' update the local db - using the case score timestamp to prevent the me request from recursive updates back to stellar '''
-                                    LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=latest_case_score_ts)
-                        else:
-                            l.debug("Stellar case modified but earlier then last ticket update: sc mod: {} | last sync mod: {}".format(stellar_case_modified_ts, rt_ticket_last_modified))
+                                ''' add the note and update the score '''
+                                JIRA.add_comment(issue_id=rt_ticket_number, comment_body=note_text)
 
-                        ''' if in resolved state, ignore timestamp comparison '''
-                        if STELLAR_SYNC_CASE_STATUS_RESOLVED:
-                            case_status = case.get('status', '')
-                            case_resolution = case.get('resolution', '')
-                            if case_status == "Resolved":
-                                l.info("Stellar case found in a resolved state. Resolving Jira issue: [case: {}] [jira: {}] [{}/{}]".format(stellar_case_id, rt_ticket_number, STELLAR_SYNC_CASE_STATUS_RESOLVED, case_resolution))
-                                JIRA.resolve_issue(issue_id=rt_ticket_number, resolution_name=STELLAR_SYNC_CASE_STATUS_RESOLVED, resolution_type=case_resolution)
-                                LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
-                            elif case_status == "Canceled":
-                                l.info("Stellar case found in a canceled state. Resolving Jira issue: [case: {}] [jira: {}] [{}/{}]".format(stellar_case_id, rt_ticket_number, STELLAR_SYNC_CASE_STATUS_RESOLVED,))
-                                JIRA.resolve_issue(issue_id=rt_ticket_number,
-                                                   resolution_name=STELLAR_SYNC_CASE_STATUS_RESOLVED,
-                                                   resolution_type=case_resolution)
-                                LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
-                            else:
-                                l.debug("Stellar case not found in resolved or canceled state - no sync necessary: [{}]".format(stellar_case_id))
+                                ''' update the local db - using the case score timestamp to prevent the me request from recursive updates back to stellar '''
+                                LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=latest_case_score_ts)
+
+                        if STELLAR_SYNC_CASE_ASSIGNEE:
+                            for case_activity in stellar_case_activities:
+                                case_activity_field = case_activity.get('field', '')
+                                case_activity_ts = case_activity.get('timestamp', 0)
+                                if case_activity_field == "assignee" and case_activity_ts > rt_ticket_last_modified:
+                                    new_assignee = case.get('assignee_name', '')
+                                    if new_assignee:
+                                        note_text = "*Stellar case assignment:*\n\n{}".format(new_assignee)
+                                        JIRA.add_comment(issue_id=rt_ticket_number, comment_body=note_text)
+                                        l.debug(
+                                            "Stellar case updated with assignee - adding jira note: Stellar Case ID: [{}] | JIRA id: [{}] | Assignee: [{}]".format(
+                                                stellar_case_id, rt_ticket_number, new_assignee))
+                                        LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id,
+                                                                           rt_ticket_ts=stellar_case_modified_ts)
+                                        ''' only do one otherwise older entries could clobber newer ones '''
+                                        break
+
+                        ''' status change - new or inprogress '''
+                        if STELLAR_SYNC_CASE_STATUS_REOPENED or STELLAR_SYNC_CASE_STATUS_INPROGRESS:
+                            for case_activity in stellar_case_activities:
+                                case_activity_field = case_activity.get('field', '')
+                                case_activity_ts = case_activity.get('timestamp', 0)
+                                if case_activity_field == "status" and case_activity_ts > rt_ticket_last_modified:
+                                    new_status = case_activity.get('to', '')
+                                    case_status = case.get('status', '')
+                                    if new_status == case_status and new_status == "New":
+                                        l.debug("Setting jira status: {}".format(STELLAR_SYNC_CASE_STATUS_REOPENED))
+                                        JIRA.update_issue_state(issue_id=rt_ticket_number,
+                                                                state_name=STELLAR_SYNC_CASE_STATUS_REOPENED)
+                                        LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id,
+                                                                           rt_ticket_ts=stellar_case_modified_ts,
+                                                                           state="sync")
+                                        break
+                                    elif new_status == case_status and new_status in ["In Progress", "Escalated"]:
+                                        l.debug("Setting jira status: {}".format(STELLAR_SYNC_CASE_STATUS_INPROGRESS))
+                                        JIRA.update_issue_state(issue_id=rt_ticket_number,
+                                                                state_name=STELLAR_SYNC_CASE_STATUS_INPROGRESS)
+                                        LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id,
+                                                                           rt_ticket_ts=stellar_case_modified_ts,
+                                                                           state="sync")
+                                        break
+
+                        # if STELLAR_SYNC_CASE_STATUS_REOPENED and case.get('status', '') == "New":
+                        #     l.debug("Setting jira status: {}".format(STELLAR_SYNC_CASE_STATUS_REOPENED))
+                        #     JIRA.update_issue_state(issue_id=rt_ticket_number, state_name=STELLAR_SYNC_CASE_STATUS_REOPENED)
+                        #     LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=stellar_case_modified_ts, state="open")
+                        # elif STELLAR_SYNC_CASE_STATUS_INPROGRESS and case.get('status', '') in ["In Progress", "Escalated"]:
+                        #     l.debug("Setting jira status: {}".format(STELLAR_SYNC_CASE_STATUS_INPROGRESS))
+                        #     JIRA.update_issue_state(issue_id=rt_ticket_number, state_name=STELLAR_SYNC_CASE_STATUS_INPROGRESS)
+                        #     LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=stellar_case_modified_ts, state="open")
+                        #
 
                     else:
-                        l.debug("Stellar case modified but no syncs optioned: [{}] | sc_sync_comments: {} | sc_sync_updates: {} | sc_sync_resolved: {}".format(stellar_case_id, STELLAR_SYNC_COMMENTS, STELLAR_SYNC_CASE_UPDATES, STELLAR_SYNC_CASE_STATUS_RESOLVED))
+                        l.debug("Stellar case modified but earlier then last ticket update: sc mod: {} | last sync mod: {}".format(stellar_case_modified_ts, rt_ticket_last_modified))
+
+                    ''' if in resolved state, ignore timestamp comparison '''
+                    if STELLAR_SYNC_CASE_STATUS_RESOLVED:
+                        if stellar_case_status == "Resolved":
+                            case_resolution = case.get('resolution', '')
+                            l.info("Stellar case found in a resolved state. Resolving Jira issue: [case: {}] [jira: {}] [{}/{}]".format(stellar_case_id, rt_ticket_number, STELLAR_SYNC_CASE_STATUS_RESOLVED, case_resolution))
+                            JIRA.resolve_issue(issue_id=rt_ticket_number, resolution_name=STELLAR_SYNC_CASE_STATUS_RESOLVED, resolution_type=case_resolution)
+                            LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
+                        elif stellar_case_status == "Canceled":
+                            l.info("Stellar case found in a canceled state. Resolving Jira issue: [case: {}] [jira: {}] [{}/{}]".format(stellar_case_id, rt_ticket_number, STELLAR_SYNC_CASE_STATUS_RESOLVED,))
+                            JIRA.resolve_issue(issue_id=rt_ticket_number,
+                                               resolution_name=STELLAR_SYNC_CASE_STATUS_RESOLVED,
+                                               resolution_type=case_resolution)
+                            LDB.close_ticket_linkage(stellar_case_id=stellar_case_id)
+                        else:
+                            l.debug("Stellar case not found in resolved or canceled state: [{}]".format(stellar_case_id))
+
                 else:
 
-                    """ this is a new instance - create new jira ticket and insert linkage into local database """
+                    '''                                                                                         '''
+                    ''' this is a new instance - create new jira ticket and insert linkage into local database  '''
+                    '''                                                                                         '''
                     stellar_tenant_id = case.get('cust_id', '')
                     stellar_tenant_name = case.get('tenant_name', '')
 
@@ -372,14 +468,23 @@ if __name__ == "__main__":
                         stellar_case_comment = "Jira issue created: id: [{}] | key: [{}] | url: [{}]".format(jira_id, jira_key, jira_url)
                         l.info(stellar_case_comment)
                         SU.update_stellar_case (case_id=stellar_case_id, case_comment=stellar_case_comment, case_status=STELLAR_CASE_STATUS_ON_SYNC)
+
+                        ''' check for assignee '''
+                        new_assignee = case.get('assignee_name', '')
+                        if new_assignee:
+                            note_text = "*Stellar case assignment:*\n\n{}".format(new_assignee)
+                            JIRA.add_comment(issue_id=jira_key, comment_body=note_text)
+
                     else:
                         l.error("Problem creating JIRA issue - no jira ID or KEY returned")
+
+            SU.checkpoint_write(filepath=JIRA_CHECKPOINT_FILENAME, val=NEW_CHECKPOINT_TS)
 
             ''' for testing - bail after first run '''
             if args.TEST_MODE:
                 exit(0)
 
-            SU.checkpoint_write(filepath=CHECKPOINT_FILENAME, val=NEW_CHECKPOINT_TS)
+            SU.checkpoint_write(filepath=STELLAR_CHECKPOINT_FILENAME, val=NEW_CHECKPOINT_TS)
             ts_loop_duration = time() - ts_start_of_loop
             if POLL_INTERVAL > ts_loop_duration:
                 ts_sleep_time = POLL_INTERVAL - ts_loop_duration
