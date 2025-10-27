@@ -1,4 +1,4 @@
-__version__ = '20251022.000'
+__version__ = '20251027.000'
 
 """
 Provides utilitarian methods for general stellar cyber usage.
@@ -38,7 +38,8 @@ Provides utilitarian methods for general stellar cyber usage.
                                 updated STELLAR_UTIL _init to handle path to checkpoint file (container persistent volume support)
                 20250912.000    improved the use of the persistent data directory for checkpoint file read/write
                 20251016.000    STELLAR_UTIL.update_stellar_case change in behavior - if unknown case status, ignore  
-                20251022.000    local_db get ticket linkage updates to return state (open/closed)             
+                20251022.000    local_db get ticket linkage updates to return state (open/closed)  
+                20251027.000    added new STELLAR_UTIL method to return all case activities as a list           
 """
 
 import os, sys
@@ -349,6 +350,14 @@ class STELLAR_UTIL:
     def get_case_scores(self, case_id):
         path = "/connect/api/v1/cases/{}/scores".format(case_id)
         self.l.debug("Getting case scores: [{}]".format(case_id))
+        r = self._request_get(path=path)
+        r = r.get('data', {})
+        return r
+
+    ''' case activities include changes in severity, assignee and status - each with assocated timestamp and previous value'''
+    def get_case_activities(self, case_id):
+        path = "/connect/api/v1/cases/{}/activities".format(case_id)
+        self.l.debug("Getting case activities: [{}]".format(case_id))
         r = self._request_get(path=path)
         r = r.get('data', {})
         return r
@@ -1265,12 +1274,22 @@ class local_db():
             cur = self.con.cursor()
             r = cur.execute(sql)
 
-    def update_remote_ticket_timestamp(self, stellar_case_id, rt_ticket_ts=None):
+    def reopen_ticket_linkage(self, stellar_case_id):
+        ts = int(time.time()) * 1000
+        sql = 'UPDATE {} SET state = "reopen", ts = {} WHERE stellar_case_id = "{}"'.format(self.ticket_table_name, ts,
+                                                                                            stellar_case_id)
+        with self.con:
+            cur = self.con.cursor()
+            r = cur.execute(sql)
+
+    def update_remote_ticket_timestamp(self, stellar_case_id, rt_ticket_ts=None, state=None):
         ts = int(time.time()) * 1000
         if not rt_ticket_ts:
             rt_ticket_ts = ts
-        sql = 'UPDATE {} SET remote_ticket_last_modified = {}, ts = {} WHERE stellar_case_id = "{}"'.format(
-            self.ticket_table_name, rt_ticket_ts, ts, stellar_case_id)
+        sql = 'UPDATE {} SET remote_ticket_last_modified = {}, ts = {}'.format(self.ticket_table_name, rt_ticket_ts, ts)
+        if state:
+            sql += ', state="{}"'.format(state)
+        sql += ' WHERE stellar_case_id = "{}"'.format(stellar_case_id)
         with self.con:
             cur = self.con.cursor()
             r = cur.execute(sql)
