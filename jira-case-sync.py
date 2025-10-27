@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-__version__ = '20251027.002'
+__version__ = '20251027.001'
 
 '''
     version history
@@ -22,6 +22,7 @@ __version__ = '20251027.002'
         20251022.001    added extra debugging to assist with understanding stellar -> jira sync decisions
         20251022.002    other logic adjustments for case resolution clarity
         20251027.000    rearchitected the way that existing jira tickets are processed; using JQL and timestamp
+        20251027.001    cleanup
 
 '''
 
@@ -143,11 +144,6 @@ if __name__ == "__main__":
         SU = STELLAR_UTIL.STELLAR_UTIL(logger=l, config=config, optional_data_path=args.data_volume)
         LDB = STELLAR_UTIL.local_db(ticket_table_name='jira_tickets', optional_db_dir=args.data_volume)
 
-        ''' testing '''
-        # r = JIRA.get_issue(issue_id='EX-46')
-        # print(json.dumps(r, sort_keys=True, indent=4))
-        # exit(0)
-
         ''' new functionality - per tenant jira project key mapping - 2025/08/26 '''
         _JIRA_PROJECT_KEY_FIELD_ = config.get('per_tenant_project_key_field', '')
         if _JIRA_PROJECT_KEY_FIELD_ and _JIRA_PROJECT_KEY_FIELD_ not in ['address', 'contact']:
@@ -158,24 +154,9 @@ if __name__ == "__main__":
 
             ts_start_of_loop = time()
 
-            # """ check existing / open cases on the jira side """
-            # open_tickets = []
-            # if args.TEST_MODE:
-            #     ''' skip jira sync if in test mode '''
-            #     l.warning('skipping the check of open jira issues - test mode is enabled')
-            # else:
-            #     ''' only check jira sync if one of the sync properties have been optioned in config '''
-            #     if (JIRA_COMMENT_SYNC or JIRA_ASSIGNEE_UPDATE_AS_COMMENT or JIRA_PRIORITY_UPDATE):
-            #         open_tickets = LDB.get_open_tickets()
-
-
             '''                                     '''
             '''     important stuff to do first     '''
             '''                                     '''
-
-            # open_ticket = LDB.get_ticket_linkage(remote_ticket_id='DEME-363')
-            # print(open_ticket)
-            # exit(0)
 
             ''' if this returns as an empty dict, the jira project key will default to the one defined in the config'''
             project_key_map = load_tenants(SU, _JIRA_PROJECT_KEY_FIELD_)
@@ -279,9 +260,9 @@ if __name__ == "__main__":
             ''' manage checkpoint '''
             NEW_CHECKPOINT_TS = int(time() * 1000)
             CHECKPOINT_TS = int(SU.checkpoint_read(filepath=STELLAR_CHECKPOINT_FILENAME))
-            # cases = SU.get_stellar_cases(from_ts=CHECKPOINT_TS, use_modified_at=True)
+            cases = SU.get_stellar_cases(from_ts=CHECKPOINT_TS, use_modified_at=True)
             # cases = SU.get_stellar_cases(from_ts=1721930052690)
-            cases = {"cases": [SU.get_stellar_case_by_id(case_id="68ff2749332356d2debdd1ec")]}
+            # cases = {"cases": [SU.get_stellar_case_by_id(case_id="68ff2749332356d2debdd1ec")]}
             for case in cases.get('cases', {}):
                 stellar_case_id = case.get("_id")
                 stellar_case_number = case.get('ticket_id')
@@ -390,16 +371,6 @@ if __name__ == "__main__":
                                                                            rt_ticket_ts=stellar_case_modified_ts,
                                                                            state="sync")
                                         break
-
-                        # if STELLAR_SYNC_CASE_STATUS_REOPENED and case.get('status', '') == "New":
-                        #     l.debug("Setting jira status: {}".format(STELLAR_SYNC_CASE_STATUS_REOPENED))
-                        #     JIRA.update_issue_state(issue_id=rt_ticket_number, state_name=STELLAR_SYNC_CASE_STATUS_REOPENED)
-                        #     LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=stellar_case_modified_ts, state="open")
-                        # elif STELLAR_SYNC_CASE_STATUS_INPROGRESS and case.get('status', '') in ["In Progress", "Escalated"]:
-                        #     l.debug("Setting jira status: {}".format(STELLAR_SYNC_CASE_STATUS_INPROGRESS))
-                        #     JIRA.update_issue_state(issue_id=rt_ticket_number, state_name=STELLAR_SYNC_CASE_STATUS_INPROGRESS)
-                        #     LDB.update_remote_ticket_timestamp(stellar_case_id=stellar_case_id, rt_ticket_ts=stellar_case_modified_ts, state="open")
-                        #
 
                     else:
                         l.debug("Stellar case modified but earlier then last ticket update: sc mod: {} | last sync mod: {}".format(stellar_case_modified_ts, rt_ticket_last_modified))
