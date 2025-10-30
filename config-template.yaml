@@ -117,6 +117,10 @@ sync_stellar_comments: false
 # set to true to sync updates to a stellar case (score, new alerts) to the jira issue as a comment
 sync_stellar_case_updates: true
 
+# set to true to sync severity changes back to jira (Critical, High, Med, Low)
+# uses the jira_priority_map configuration item above
+sync_stellar_severity: true
+
 # set to true to have stellar comments or updates tagged as public, which means they will be exposed to external parties and receive notifications
 # if set to false, the comments are tagged internal which hides the comment from external parties and disables notifications
 # defaults to true
