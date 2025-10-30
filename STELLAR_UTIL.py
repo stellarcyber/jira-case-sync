@@ -1,4 +1,4 @@
-__version__ = '20251027.000'
+__version__ = '20251029.000'
 
 """
 Provides utilitarian methods for general stellar cyber usage.
@@ -39,7 +39,8 @@ Provides utilitarian methods for general stellar cyber usage.
                 20250912.000    improved the use of the persistent data directory for checkpoint file read/write
                 20251016.000    STELLAR_UTIL.update_stellar_case change in behavior - if unknown case status, ignore  
                 20251022.000    local_db get ticket linkage updates to return state (open/closed)  
-                20251027.000    added new STELLAR_UTIL method to return all case activities as a list           
+                20251027.000    added new STELLAR_UTIL method to return all case activities as a list (get_case_activities)
+                20251029.000    updated get_case_activities to summerize by type           
 """
 
 import os, sys
@@ -355,12 +356,21 @@ class STELLAR_UTIL:
         return r
 
     ''' case activities include changes in severity, assignee and status - each with assocated timestamp and previous value'''
-    def get_case_activities(self, case_id):
+    def get_case_activities(self, case_id, organize_by_type=None):
+        ret = {}
         path = "/connect/api/v1/cases/{}/activities".format(case_id)
         self.l.debug("Getting case activities: [{}]".format(case_id))
         r = self._request_get(path=path)
         r = r.get('data', {})
-        return r
+        if organize_by_type:
+            for activity in r:
+                a_type = activity.get('field')
+                if not a_type in ret:
+                    ret[a_type] = []
+                ret[a_type].append(activity)
+        else:
+            ret = r
+        return ret
 
     def get_latest_case_score(self, case_id):
         case_scores = self.get_case_scores(case_id)
@@ -827,6 +837,33 @@ class STELLAR_UTIL:
         self.l.info("Getting sensors")
         r = self._request_get(path=path)
         ret = r.get('sensors', [])
+        return ret
+
+    def lookups_get(self, tenant_id=None):
+        ret = {}
+        path = "/connect/api/v1/lookups"
+        if tenant_id:
+            path += "?cust_id={}".format(tenant_id)
+        self.l.info("Getting lookup groups")
+        r = self._request_get(path=path)
+        ret = r.get('data', [])
+        return ret
+
+    def lookup_update(self, lookup_id, lookup_name, update_list :list, lookup_type=None, tenant_id=None):
+        ret = {}
+        path = f"/connect/api/v1/lookups/{lookup_id}"
+        self.l.info(f"updating lookup group: {lookup_id}")
+        if not lookup_type:
+            lookup_type="ip"
+        if not tenant_id:
+            tenant_id=''
+        data = {
+            "cust_id": tenant_id,
+            "name": lookup_name,
+            "type": lookup_type,
+            "values": update_list
+        }
+        ret = self._request_put(path=path, data=data)
         return ret
 
     def checkpoint_write(self, filepath, val=None):
