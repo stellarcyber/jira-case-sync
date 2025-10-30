@@ -1,4 +1,4 @@
-__version__ = '20251027.000'
+__version__ = '20251029.000'
 
 '''
     Provides methods to call JIRA API for issue creation and update
@@ -14,6 +14,7 @@ __version__ = '20251027.000'
                 20251020.000    added methods to support resolving a jira case with transitions and resolution types
                 20251022.000    fixed small bug that ignored the configured summary prefix when using the service desk API
                 20251027.000    added new method to get jira issues usiog JQL which allows for timestamp abd other filtering
+                20251029.000    added new method to update jira issue with new priority
 
 '''
 
@@ -530,6 +531,33 @@ class StellarJIRA:
                     self.l.error("Cannot perform POST request for JIRA resolve issue: [{} {}]".format(return_code, e))
         else:
             self.l.error("Jira resolution name not found in transitions for this issue: [{}] [{}]".format(issue_id, state_name))
+
+    def update_issue_priority(self, issue_id, new_priority):
+        ret = {}
+        return_code = 500
+        path = "rest/api/2/issue/{}".format(issue_id)
+        url = "{}/{}".format(self.jira_url, path)
+        jira_data = {
+            "fields": {
+                 "priority": {
+                    "name": "{}".format(new_priority)
+                }
+            }
+        }
+        try:
+            r = requests.put(url=url, headers=self.headers, json=jira_data)
+            return_code = r.status_code
+            if 200 <= r.status_code <= 299:
+                ''' all good '''
+                pass
+            else:
+                ret = {"error": r.text}
+                raise Exception("{}".format(r.text))
+
+        except Exception as e:
+            self.l.error("Cannot perform PUT request for JIRA update_issue_priority: [{} {}]".format(return_code, e))
+
+        return ret
 
 
     def _get_transitions(self, issue_id):
