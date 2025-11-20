@@ -1,4 +1,4 @@
-__version__ = '20251029.000'
+__version__ = '20251120.000'
 
 '''
     Provides methods to call JIRA API for issue creation and update
@@ -15,6 +15,7 @@ __version__ = '20251029.000'
                 20251022.000    fixed small bug that ignored the configured summary prefix when using the service desk API
                 20251027.000    added new method to get jira issues usiog JQL which allows for timestamp abd other filtering
                 20251029.000    added new method to update jira issue with new priority
+                20251120.000    updated both get_issues and get_service_desk_ids to handle pagination
 
 '''
 
@@ -75,22 +76,32 @@ class StellarJIRA:
         ''' only needed if servicedeskapi is enabled '''
         sd_ids = {}
         return_code = 500
-        path = "rest/servicedeskapi/servicedesk"
-        url = "{}/{}".format(self.jira_url, path)
+
         try:
-            r = requests.get(url=url, headers=self.headers)
-            return_code = r.status_code
-            if 200 <= r.status_code <= 299:
-                sd_apps = r.json().get('values', [])
-                for sd_app in sd_apps:
-                    project_key = sd_app.get('projectKey', '')
-                    sd_id = sd_app.get('id', 0)
-                    rt_id = self._get_requesttype_id(servicedesk_id=sd_id)
-                    sd_ids[project_key] = {"servicedesk_id": sd_id, "requesttype_id": rt_id}
-            else:
-                raise Exception("{}".format(r.text))
+            start = 0
+            limit = 50
+            sd_last_page = False
+            while not sd_last_page:
+                path = "rest/servicedeskapi/servicedesk?limit={}&start={}".format(limit, start)
+                url = "{}/{}".format(self.jira_url, path)
+                r = requests.get(url=url, headers=self.headers)
+                return_code = r.status_code
+                if 200 <= r.status_code <= 299:
+                    sd_all = r.json()
+                    sd_cnt = sd_all.get('size', 0)
+                    sd_last_page = sd_all.get('isLastPage', True)
+                    sd_apps = sd_all.get('values', [])
+                    for sd_app in sd_apps:
+                        project_key = sd_app.get('projectKey', '')
+                        sd_id = sd_app.get('id', 0)
+                        rt_id = self._get_requesttype_id(servicedesk_id=sd_id)
+                        sd_ids[project_key] = {"servicedesk_id": sd_id, "requesttype_id": rt_id}
+                    start += sd_cnt
+                else:
+                    raise Exception("{}".format(r.text))
         except Exception as e:
             self.l.error("Cannot perform GET request for JIRA servicedesk ids: [{} {}]".format(return_code, e))
+        self.l.info("Retrieved servicedesk ids: [{}]".format(len(sd_ids)))
         return sd_ids
 
     def _get_requesttype_id(self, servicedesk_id):
@@ -198,11 +209,12 @@ class StellarJIRA:
     def get_issues(self, since_ts):
         '''
         https://jira-stg.speartip.adaptavist.cloud/rest/api/2/search?jql=updated > -60m AND status = reopened AND issuekey IN ('DEME-363', 'DEME-364') AND issuetype = 'Security Event'
+        https://developer.atlassian.com/server/jira/platform/rest/v11001/api-group-search/#api-api-2-search-get
 
         :param issue_id:
         :return:
         '''
-        ret = {}
+        ret = []
         path = "rest/api/2/search?jql=updated >= {}".format(since_ts)
         url = "{}/{}".format(self.jira_url, path)
         if self.jira_issue_type:
@@ -211,15 +223,24 @@ class StellarJIRA:
         #     path += " AND issuekey IN ({})".format(issue_key_list)
 
         try:
-            r = requests.get(url=url, headers=self.headers)
-            return_code = r.status_code
-            if 200 <= r.status_code <= 299:
-                ret = r.json()
-                ret = ret.get('issues', [])
-                # self.l.debug(json.dumps(ret, sort_keys=True, indent=4))
-            else:
-                ret = {"error": r.text}
-                raise Exception("{}".format(r.text))
+            maxresults = 50
+            r_cnt = 0
+            while True:
+                jql_url = "{}&maxResults={}&startAt={}".format(url, maxresults, r_cnt)
+                r = requests.get(url=jql_url, headers=self.headers)
+                return_code = r.status_code
+                if 200 <= r.status_code <= 299:
+                    r_json = r.json()
+                    r_total = r_json.get('total', 0)
+                    r_issues = r_json.get('issues', [])
+                    r_cnt += len(r_issues)
+                    ret.extend(r_issues)
+                    if r_cnt >= r_total:
+                        break
+                    # self.l.debug(json.dumps(ret, sort_keys=True, indent=4))
+                else:
+                    ret = {"error": r.text}
+                    raise Exception("{}".format(r.text))
 
         except Exception as e:
             msg = "Cannot perform get request for JIRA get issue: [{} {}]".format(return_code, e)
