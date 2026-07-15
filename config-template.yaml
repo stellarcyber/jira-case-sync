@@ -1,4 +1,7 @@
-# 20251027.000
+# 20260715.000
+
+# jira api version
+jira_api_version: "3"
 
 # added support for jira project keys to be defined per tenant
 # based on contents within an attribute field within the tenant properties within stellar
