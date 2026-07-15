@@ -1,4 +1,4 @@
-__version__ = '20251120.000'
+__version__ = '20260715.000'
 
 '''
     Provides methods to call JIRA API for issue creation and update
@@ -16,6 +16,7 @@ __version__ = '20251120.000'
                 20251027.000    added new method to get jira issues usiog JQL which allows for timestamp abd other filtering
                 20251029.000    added new method to update jira issue with new priority
                 20251120.000    updated both get_issues and get_service_desk_ids to handle pagination
+                20260715.000    updated the API endpoint to accept a variable API version number (config: jira_api_version)
 
 '''
 
@@ -57,6 +58,7 @@ class StellarJIRA:
         self.jira_comment_filter = config.get('jira_comments_filter', '')   # public, internal, empty (for all)
         self.jira_comments_as_public = config.get('sync_stellar_comments_as_public', True)
         self.jira_resolutions_map = config.get('stellar_case_resolutions', {})
+        self.jira_api_version = str(config.get('jira_api_version', '3'))
 
     def get_version(self):
         return __version__
@@ -129,7 +131,7 @@ class StellarJIRA:
     def get_projects(self):
         ret = {}
         return_code = 0
-        path = "rest/api/2/project"
+        path = "rest/api/{}/project".format(self.jira_api_version)
         url = "{}/{}".format(self.jira_url, path)
         try:
             r = requests.get(url=url, headers=self.headers)
@@ -148,7 +150,7 @@ class StellarJIRA:
 
     def get_issue_types(self, project_key):
         ret = {}
-        path = "rest/api/2/issue/createmeta/{}/issuetypes".format(project_key)
+        path = "rest/api/{}/issue/createmeta/{}/issuetypes".format(self.jira_api_version, project_key)
         url = "{}/{}".format(self.jira_url, path)
         try:
             r = requests.get(url=url, headers=self.headers)
@@ -167,7 +169,7 @@ class StellarJIRA:
 
     def get_issue_fields(self, project_key, issue_id):
         ret = {}
-        path = "rest/api/2/issue/createmeta/{}/issuetypes/{}".format(project_key, issue_id)
+        path = "rest/api/{}/issue/createmeta/{}/issuetypes/{}".format(self.jira_api_version, project_key, issue_id)
         url = "{}/{}".format(self.jira_url, path)
         try:
             r = requests.get(url=url, headers=self.headers)
@@ -187,7 +189,7 @@ class StellarJIRA:
     def get_issue(self, issue_id):
         ret = {}
         # path = "rest/servicedeskapi/request/{}".format(issue_id)
-        path = "rest/api/2/issue/{}".format(issue_id)
+        path = "rest/api/{}/issue/{}".format(self.jira_api_version, issue_id)
         url = "{}/{}".format(self.jira_url, path)
         try:
             r = requests.get(url=url, headers=self.headers)
@@ -208,14 +210,14 @@ class StellarJIRA:
 
     def get_issues(self, since_ts):
         '''
-        https://jira-stg.speartip.adaptavist.cloud/rest/api/2/search?jql=updated > -60m AND status = reopened AND issuekey IN ('DEME-363', 'DEME-364') AND issuetype = 'Security Event'
+        https://jira-stg.xxx.adaptavist.cloud/rest/api/2/search?jql=updated > -60m AND status = reopened AND issuekey IN ('DEME-363', 'DEME-364') AND issuetype = 'Security Event'
         https://developer.atlassian.com/server/jira/platform/rest/v11001/api-group-search/#api-api-2-search-get
 
         :param issue_id:
         :return:
         '''
         ret = []
-        path = "rest/api/2/search?jql=updated >= {}".format(since_ts)
+        path = "rest/api/{}/search?jql=updated >= {}".format(self.jira_api_version, since_ts)
         url = "{}/{}".format(self.jira_url, path)
         if self.jira_issue_type:
             path += " AND issuetype = {}".format(self.jira_issue_type)
@@ -260,7 +262,7 @@ class StellarJIRA:
 
     def _create_issue(self, summary, description, case_score, label=''):
         ret = {}
-        path = "rest/api/2/issue"
+        path = "rest/api/{}/issue".format(self.jira_api_version)
         url = "{}/{}".format(self.jira_url, path)
         priority_name = self.get_ticket_priority(case_score)
         jira_data = {
@@ -357,7 +359,7 @@ class StellarJIRA:
                         start_date = datetime.now().strftime("%Y-%m-%d")
                         jira_data['fields'][self.jira_custom_field] = start_date
 
-                    path = "rest/api/2/issue/{}".format(jira_key)
+                    path = "rest/api/{}/issue/{}".format(self.jira_api_version, jira_key)
                     url = "{}/{}".format(self.jira_url, path)
                     r = requests.put(url=url, headers=self.headers, json=jira_data)
                     return_code = r.status_code
@@ -379,7 +381,7 @@ class StellarJIRA:
         if self.jira_comment_use_servicedesk_api:
             path = "rest/servicedeskapi/request/{}/comment".format(issue_id)
         else:
-            path = "rest/api/2/issue/{}/comment".format(issue_id)
+            path = "rest/api/{}/issue/{}/comment".format(self.jira_api_version, issue_id)
         is_public = True if self.jira_comments_as_public else False
         url = "{}/{}".format(self.jira_url, path)
         jira_data = {
@@ -411,7 +413,7 @@ class StellarJIRA:
 
     def _get_comments_jira_api(self, issue_id):
         ret = {}
-        path = "rest/api/2/issue/{}/comment".format(issue_id)
+        path = "rest/api/{}/issue/{}/comment".format(self.jira_api_version, issue_id)
         url = "{}/{}".format(self.jira_url, path)
         try:
             r = requests.get(url=url, headers=self.headers)
@@ -427,7 +429,7 @@ class StellarJIRA:
 
     def _get_comment_by_id(self, issue_id, comment_id):
         ret = {}
-        path = "rest/api/2/issue/{}/comment/{}".format(issue_id, comment_id)
+        path = "rest/api/{}/issue/{}/comment/{}".format( self.jira_api_version,issue_id, comment_id)
         url = "{}/{}".format(self.jira_url, path)
         try:
             r = requests.get(url=url, headers=self.headers)
@@ -481,7 +483,7 @@ class StellarJIRA:
         }
         headers.update(self.headers)
         files = {"file": (file_name, attachment_json, "application-type")}
-        path = "rest/api/2/issue/{}/attachments".format(issue_id)
+        path = "rest/api/{}/issue/{}/attachments".format(self.jira_api_version, issue_id)
         url = "{}/{}".format(self.jira_url, path)
 
         try:
@@ -514,7 +516,7 @@ class StellarJIRA:
                 j_data = {"transition": {"id": t_id}}
                 if jira_resolution:
                     j_data['fields'] = {"resolution": {"name": jira_resolution}}
-                path = "rest/api/2/issue/{}/transitions".format(issue_id)
+                path = "rest/api/{}/issue/{}/transitions".format(self.jira_api_version, issue_id)
                 url = "{}/{}".format(self.jira_url, path)
                 try:
                     r = requests.post(url=url, headers=self.headers, json=j_data)
@@ -537,7 +539,7 @@ class StellarJIRA:
             t_id = transitions[state_name]
             if t_id:
                 j_data = {"transition": {"id": t_id}}
-                path = "rest/api/2/issue/{}/transitions".format(issue_id)
+                path = "rest/api/{}/issue/{}/transitions".format(self.jira_api_version, issue_id)
                 url = "{}/{}".format(self.jira_url, path)
                 try:
                     r = requests.post(url=url, headers=self.headers, json=j_data)
@@ -556,7 +558,7 @@ class StellarJIRA:
     def update_issue_priority(self, issue_id, new_priority):
         ret = {}
         return_code = 500
-        path = "rest/api/2/issue/{}".format(issue_id)
+        path = "rest/api/{}/issue/{}".format(self.jira_api_version, issue_id)
         url = "{}/{}".format(self.jira_url, path)
         jira_data = {
             "fields": {
@@ -583,7 +585,7 @@ class StellarJIRA:
 
     def _get_transitions(self, issue_id):
         ret = {}
-        path = "rest/api/2/issue/{}/transitions".format(issue_id)
+        path = "rest/api/{}/issue/{}/transitions".format(self.jira_api_version, issue_id)
         url = "{}/{}".format(self.jira_url, path)
         try:
             r = requests.get(url=url, headers=self.headers)
