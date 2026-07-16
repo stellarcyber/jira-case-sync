@@ -1,4 +1,4 @@
-__version__ = '20260715.000'
+__version__ = '20260716.000'
 
 '''
     Provides methods to call JIRA API for issue creation and update
@@ -17,6 +17,7 @@ __version__ = '20260715.000'
                 20251029.000    added new method to update jira issue with new priority
                 20251120.000    updated both get_issues and get_service_desk_ids to handle pagination
                 20260715.000    updated the API endpoint to accept a variable API version number (config: jira_api_version)
+                20260716.000    slight update to the JQL url to comply with the latest change with atlassian API parameter syntax
 
 '''
 
@@ -217,7 +218,7 @@ class StellarJIRA:
         :return:
         '''
         ret = []
-        path = "rest/api/{}/search?jql=updated >= {}".format(self.jira_api_version, since_ts)
+        path = "rest/api/{}/search/jql?jql=updated >= {}".format(self.jira_api_version, since_ts)
         url = "{}/{}".format(self.jira_url, path)
         if self.jira_issue_type:
             path += " AND issuetype = {}".format(self.jira_issue_type)
